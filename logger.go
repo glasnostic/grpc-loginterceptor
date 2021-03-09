@@ -3,14 +3,11 @@ package grpc_loginterceptor
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/rs/xid"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/peer"
 )
 
 var (
@@ -20,11 +17,15 @@ var (
 )
 
 type accessLoggerInterceptor struct {
-	logWriter io.Writer
+	printer
 }
 
 func NewAccessLoggerInterceptor(logWriter io.Writer) grpc.UnaryServerInterceptor {
-	return (&accessLoggerInterceptor{logWriter: logWriter}).Intercept
+	return (&accessLoggerInterceptor{printer: newLogWriterPrinter(logWriter)}).Intercept
+}
+
+func NewAccessLoggerInterceptorWithLogger(l loggerWithFields) grpc.UnaryServerInterceptor {
+	return (&accessLoggerInterceptor{printer: newStructedLoggerPrinter(l)}).Intercept
 }
 
 func (a *accessLoggerInterceptor) Intercept(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -61,30 +62,4 @@ func (a *accessLoggerInterceptor) afterHandle(ctx context.Context, info *grpc.Un
 	}
 
 	a.printf(ctx, requestEnd, info, "%13v\n%s", requestEnd.Sub(requestBegin), errMessage)
-}
-
-func (a *accessLoggerInterceptor) printf(ctx context.Context, timestamp time.Time, info *grpc.UnaryServerInfo, format string, args ...interface{}) {
-	requestId := ctx.Value(DefaultRequestIDKey).(string)
-	fmt.Fprintf(a.writer(), "[gRPC] %v | %15s | %s | %s | %s",
-		timestamp.Format("2006/01/02 - 15:04:05"),
-		clientIP(ctx),
-		requestId,
-		info.FullMethod,
-		fmt.Sprintf(format, args...),
-	)
-}
-
-func (a *accessLoggerInterceptor) writer() io.Writer {
-	if a.logWriter != nil {
-		return a.logWriter
-	}
-	return os.Stdout
-}
-
-func clientIP(ctx context.Context) string {
-	p, ok := peer.FromContext(ctx)
-	if ok {
-		return p.Addr.String()
-	}
-	return ""
 }
